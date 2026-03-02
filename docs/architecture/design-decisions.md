@@ -1,5 +1,34 @@
 # Design Decisions & Technology Rationale
 
+## Weekend 1 (completed) — Foundation
+
+### Why Raspberry Pi 4, 4GB RAM Acer laptop, 16GB RAM Ubuntu PC, and Dell workstation Laptop
+I wanted to make this project with what I have. Because of budget constraints, I thought it would be a fun challenge to make it happen. The raspi was gifted to me by my brother. The acer is a very old laptop I have. The Ubuntu PC was an old PC (nice at that time) I bought from my friend years ago. Lastly, the Dell Laptop was my most recent expensive purchase. I want it as my main workstation for personal use and for other projects.
+
+### Why Ubuntu Server with No GUI on Both the Brain and Adversary
+Both the Ubuntu PC and Acer run Ubuntu Server 24.04 LTS without a desktop
+environment. The Brain's 15.5 GB RAM is tight for running 5+ Docker services —
+removing the GUI frees ~1.5 GB. The Acer's 4 GB RAM is even more constrained.
+Both machines are accessed exclusively via SSH from the Dell workstation, making
+a GUI unnecessary. This mirrors enterprise server deployment where GUIs are
+never installed on production infrastructure.
+
+### Why Port Mirroring Instead of Inline Deployment
+The Pi sensor is deployed as a passive tap via port mirroring, not inline. In
+enterprise OT environments, inline IDS deployment risks breaking production
+traffic if the sensor fails. Passive monitoring via SPAN/mirror ports is the
+standard approach because it guarantees zero impact on the monitored network.
+
+### Why WiFi for Pi Management Instead of a Second Ethernet Port
+The Pi has only one Ethernet port, which is dedicated to receiving mirrored
+traffic in promiscuous mode (no IP). Management access (SSH, log shipping) goes
+over WiFi (wlan0). This mirrors enterprise IDS deployments where sensors have
+separate monitoring and management interfaces — often a dedicated management
+NIC or out-of-band connection.
+
+
+## ------------ Whole project outline draft. May change with weekly progess --------- ##
+
 ## Intrusion Detection System: Suricata vs Alternatives
 
 ### Decision: Suricata IDS/IPS
