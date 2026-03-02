@@ -1,0 +1,215 @@
+# HungryHoundDog Custom OT (Operational Technology) Rules
+# Modbus TCP Detection and Anomaly Detection Rules
+# Last Updated: 2026-02-27
+#
+# Rule Format: action protocol source_ip source_port -> dest_ip dest_port (msg:"message"; sid:123456; ...)
+# SID Range: 1000001 - 1000999 (Custom OT Rules)
+
+# ============================================================================
+# MODBUS TCP PROTOCOL DETECTION
+# ============================================================================
+
+# Rule 1000001: Modbus Read Coils (Function Code 1)
+# Detects legitimate Modbus read coil requests
+alert tcp $HOME_NET any -> $HOME_NET 502 (msg:"OT: Modbus Read Coils Function Code 1"; 
+  flow:to_server,established; 
+  content:"|00 00 00 00 00 06 01|"; 
+  depth:7; offset:0;
+  classtype:protocol-command-decode; 
+  sid:1000001; 
+  rev:1; 
+  metadata:policy security-ips; 
+  reference:url,https://en.wikipedia.org/wiki/Modbus;)
+
+# Rule 1000002: Modbus Read Discrete Inputs (Function Code 2)
+# Detects Modbus read discrete input requests
+alert tcp $HOME_NET any -> $HOME_NET 502 (msg:"OT: Modbus Read Discrete Inputs Function Code 2"; 
+  flow:to_server,established; 
+  content:"|00 00 00 00 00 06 02|"; 
+  depth:7; offset:0;
+  classtype:protocol-command-decode; 
+  sid:1000002; 
+  rev:1; 
+  metadata:policy security-ips;)
+
+# Rule 1000003: Modbus Read Holding Registers (Function Code 3)
+# Detects Modbus read holding register requests
+alert tcp $HOME_NET any -> $HOME_NET 502 (msg:"OT: Modbus Read Holding Registers Function Code 3"; 
+  flow:to_server,established; 
+  content:"|00 00 00 00 00 06 03|"; 
+  depth:7; offset:0;
+  classtype:protocol-command-decode; 
+  sid:1000003; 
+  rev:1; 
+  metadata:policy security-ips;)
+
+# Rule 1000004: Modbus Read Input Registers (Function Code 4)
+# Detects Modbus read input register requests
+alert tcp $HOME_NET any -> $HOME_NET 502 (msg:"OT: Modbus Read Input Registers Function Code 4"; 
+  flow:to_server,established; 
+  content:"|00 00 00 00 00 06 04|"; 
+  depth:7; offset:0;
+  classtype:protocol-command-decode; 
+  sid:1000004; 
+  rev:1; 
+  metadata:policy security-ips;)
+
+# ============================================================================
+# MODBUS WRITE OPERATIONS (CONTROL COMMANDS)
+# ============================================================================
+
+# Rule 1000005: Modbus Write Single Coil (Function Code 5)
+# Detects Modbus write single coil commands - may indicate control operations
+alert tcp $HOME_NET any -> $HOME_NET 502 (msg:"OT: Modbus Write Single Coil Function Code 5"; 
+  flow:to_server,established; 
+  content:"|00 00 00 00 00 06 05|"; 
+  depth:7; offset:0;
+  classtype:protocol-command-decode; 
+  sid:1000005; 
+  rev:1; 
+  metadata:policy security-ips; 
+  xref:url,https://modbus.org/docs/Modbus_Application_Protocol_V1_1b3.pdf;)
+
+# Rule 1000006: Modbus Write Single Register (Function Code 6)
+# Detects Modbus write single register commands - indicates control operations
+alert tcp $HOME_NET any -> $HOME_NET 502 (msg:"OT: Modbus Write Single Register Function Code 6"; 
+  flow:to_server,established; 
+  content:"|00 00 00 00 00 06 06|"; 
+  depth:7; offset:0;
+  classtype:protocol-command-decode; 
+  sid:1000006; 
+  rev:1; 
+  metadata:policy security-ips;)
+
+# ============================================================================
+# MODBUS WRITE MULTIPLE OPERATIONS (ATTACK INDICATORS)
+# ============================================================================
+
+# Rule 1000007: Modbus Write Multiple Coils (Function Code 15/0x0F)
+# Detects Modbus write multiple coils - potential attack indicator
+alert tcp $HOME_NET any -> $HOME_NET 502 (msg:"OT: Modbus Write Multiple Coils Function Code 15"; 
+  flow:to_server,established; 
+  content:"|00 00 00 00|"; depth:4; offset:0;
+  content:"|0f|"; depth:1; offset:6;
+  classtype:attempt-recon; 
+  sid:1000007; 
+  rev:1; 
+  metadata:policy security-ips; 
+  priority:2;)
+
+# Rule 1000008: Modbus Write Multiple Registers (Function Code 16/0x10)
+# Detects Modbus write multiple registers - high risk operation indicating potential attack
+alert tcp $HOME_NET any -> $HOME_NET 502 (msg:"OT: Modbus Write Multiple Registers Function Code 16 - ATTACK INDICATOR"; 
+  flow:to_server,established; 
+  content:"|00 00 00 00|"; depth:4; offset:0;
+  content:"|10|"; depth:1; offset:6;
+  classtype:attempted-admin; 
+  sid:1000008; 
+  rev:1; 
+  metadata:policy security-ips; 
+  priority:1; 
+  reference:url,https://www.cisa.gov/news-events;)
+
+# ============================================================================
+# MODBUS EXCEPTION AND ANOMALY DETECTION
+# ============================================================================
+
+# Rule 1000009: Modbus Exception Response (Function Code 0x80+)
+# Detects Modbus exception responses which may indicate errors or attacks
+alert tcp $HOME_NET 502 -> $HOME_NET any (msg:"OT: Modbus Exception Response Detected"; 
+  flow:to_client,established; 
+  content:"|00 00 00 00|"; depth:4; offset:0;
+  byte_test:1,>,128,6; 
+  classtype:protocol-command-decode; 
+  sid:1000009; 
+  rev:1; 
+  metadata:policy security-ips;)
+
+# Rule 1000010: Modbus Invalid Unit ID
+# Detects Modbus requests to invalid unit IDs (not 0-247)
+alert tcp $HOME_NET any -> $HOME_NET 502 (msg:"OT: Modbus Invalid Unit ID"; 
+  flow:to_server,established; 
+  content:"|00 00 00 00 00 06|"; depth:6; offset:0;
+  byte_test:1,>,247,6; 
+  classtype:protocol-command-decode; 
+  sid:1000010; 
+  rev:1; 
+  metadata:policy security-ips;)
+
+# ============================================================================
+# MODBUS PROTOCOL COMPLIANCE AND SCANNING
+# ============================================================================
+
+# Rule 1000011: Modbus Broadcast Request (Invalid - Unit ID 0)
+# Detects potentially malicious broadcast requests
+alert tcp $HOME_NET any -> $HOME_NET 502 (msg:"OT: Modbus Broadcast Unit ID Request"; 
+  flow:to_server,established; 
+  content:"|00 00 00 00 00 06 00|"; 
+  depth:7; offset:0;
+  classtype:attempt-recon; 
+  sid:1000011; 
+  rev:1; 
+  metadata:policy security-ips;)
+
+# Rule 1000012: High Volume Modbus Requests
+# Detects unusual volume of Modbus requests that may indicate scanning or fuzzing
+alert tcp $HOME_NET any -> $HOME_NET 502 (msg:"OT: High Volume Modbus Requests Detected"; 
+  flow:to_server,established; 
+  content:"|00 00 00 00|"; depth:4; offset:0;
+  detection_filter:track by_dst, count 50, seconds 60; 
+  classtype:attempt-recon; 
+  sid:1000013; 
+  rev:1; 
+  metadata:policy security-ips;)
+
+# ============================================================================
+# MODBUS FUNCTION CODE MONITORING
+# ============================================================================
+
+# Rule 1000014: Modbus Encapsulated Interface Transport (Function Code 43)
+# Detects MODBUS encapsulated interface transport requests
+alert tcp $HOME_NET any -> $HOME_NET 502 (msg:"OT: Modbus Encapsulated Interface Transport FC 43"; 
+  flow:to_server,established; 
+  content:"|00 00 00 00|"; depth:4; offset:0;
+  content:"|2b|"; depth:1; offset:6;
+  classtype:protocol-command-decode; 
+  sid:1000014; 
+  rev:1; 
+  metadata:policy security-ips;)
+
+# Rule 1000015: Modbus Get Comm Event Counter (Function Code 11)
+# Detects Modbus get communication event counter requests
+alert tcp $HOME_NET any -> $HOME_NET 502 (msg:"OT: Modbus Get Comm Event Counter FC 11"; 
+  flow:to_server,established; 
+  content:"|00 00 00 00 00 06 0b|"; 
+  depth:7; offset:0;
+  classtype:protocol-command-decode; 
+  sid:1000015; 
+  rev:1; 
+  metadata:policy security-ips;)
+
+# ============================================================================
+# ANOMALOUS MODBUS ACTIVITY
+# ============================================================================
+
+# Rule 1000016: Modbus Payload Size Anomaly
+# Detects Modbus packets with unusually large payloads (potential exploits)
+alert tcp $HOME_NET any -> $HOME_NET 502 (msg:"OT: Modbus Unusually Large Payload"; 
+  flow:to_server,established; 
+  content:"|00 00 00 00|"; depth:4; offset:0;
+  byte_test:2,>,1000,4; 
+  classtype:protocol-command-decode; 
+  sid:1000016; 
+  rev:1; 
+  metadata:policy security-ips;)
+
+# Rule 1000017: Modbus to Non-Standard Port
+# Detects Modbus traffic on ports other than 502
+alert tcp $HOME_NET any -> $HOME_NET !502 (msg:"OT: Modbus Traffic on Non-Standard Port"; 
+  content:"|00 00 00 00|"; depth:4; offset:0;
+  content:"|00 06|"; depth:2; offset:4;
+  classtype:protocol-command-decode; 
+  sid:1000017; 
+  rev:1; 
+  metadata:policy security-ips;)
+

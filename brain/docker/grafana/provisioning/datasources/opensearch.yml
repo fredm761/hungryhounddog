@@ -1,0 +1,34 @@
+# Grafana Datasource Provisioning for OpenSearch
+# ===============================================
+# This configuration auto-provisions OpenSearch as a data source in Grafana.
+# Datasources are loaded from this file when Grafana starts.
+
+apiVersion: 1
+
+datasources:
+  - name: OpenSearch
+    type: opensearch
+    access: proxy
+    url: http://opensearch:9200
+    database: ""
+    basicAuth: false
+    isDefault: true
+    jsonData:
+      tlsSkipVerify: true
+      logMessageFormat: json
+    editable: true
+    version: 1
+
+  - name: OpenSearch-Logs
+    type: opensearch
+    access: proxy
+    url: http://opensearch:9200
+    database: ""
+    basicAuth: false
+    isDefault: false
+    jsonData:
+      tlsSkipVerify: true
+      logMessageFormat: json
+      maxConcurrentShardRequests: 5
+    editable: true
+    version: 1

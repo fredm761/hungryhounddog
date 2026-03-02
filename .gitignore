@@ -1,0 +1,50 @@
+# Environment and secrets
+.env
+*.pem
+*.key
+*.crt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+venv/
+.venv/
+env/
+
+# ML Models (too large for Git)
+server/detection/ml/models/*.joblib
+server/detection/ml/models/*.pkl
+
+# Docker volumes and data
+docker-data/
+opensearch-data/
+chromadb-data/
+grafana-data/
+
+# Logs
+*.log
+logs/
+sensor/config/suricata/logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Node (if any web UI dependencies)
+node_modules/

@@ -1,0 +1,26 @@
+# Grafana Dashboard Provisioning Configuration
+# =============================================
+# This configuration defines how Grafana loads dashboard definitions from JSON files.
+# Dashboards in the dashboards/ directory will be automatically imported on startup.
+
+apiVersion: 1
+
+providers:
+  - name: HungryHoundDog Dashboards
+    type: file
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      folderId: 0
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    orgName: Main Org
+
+  - name: Security Alerts Dashboard
+    type: file
+    options:
+      path: /etc/grafana/provisioning/dashboards/security_alerts.json
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    orgName: Main Org

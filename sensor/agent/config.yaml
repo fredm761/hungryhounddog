@@ -1,0 +1,151 @@
+# HungryHoundDog Sensor Agent Configuration
+# Raspberry Pi 4 - Suricata IDS Node
+# Last Updated: 2026-02-27
+
+agent:
+  # Sensor identification
+  sensor_id: 'sensor-001'
+  sensor_name: 'RPi4-Sensor-01'
+  
+  # Brain Server Configuration
+  brain_endpoint: 'https://brain.hungryhounddog.local/api/events'
+  brain_health_endpoint: 'https://brain.hungryhounddog.local/api/health'
+  brain_api_key: '${BRAIN_API_KEY}'  # Set via environment variable for security
+  
+  # Log Shipper Settings
+  ship_interval: 30              # Seconds between batch shipments
+  batch_size: 100                # Number of events per batch
+  eve_log_path: '/var/log/suricata/eve.json'
+  seek_file_path: '/var/lib/hungryhounddog/eve.seek'
+  
+  # Health Check Settings
+  health_check_interval: 60      # Seconds between health reports
+  suricata_process_name: 'suricata'
+  network_interfaces:
+    - 'eth0'                     # Primary network interface for packet capture
+    - 'lo'                       # Loopback for health verification
+  
+  # TLS/SSL Settings
+  verify_ssl: true               # Verify Brain server's SSL certificate
+  ca_cert_path: '/etc/hungryhounddog/certs/ca.crt'
+  client_cert_path: '/etc/hungryhounddog/certs/client.crt'
+  client_key_path: '/etc/hungryhounddog/certs/client.key'
+  
+  # Network Timeouts (seconds)
+  connect_timeout: 10
+  read_timeout: 30
+  
+  # Retry Configuration
+  retry_attempts: 3
+  retry_backoff_factor: 2.0      # Exponential backoff multiplier
+  
+  # Logging
+  log_level: 'INFO'              # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  log_file: '/var/log/hungryhounddog/sensor-agent.log'
+  log_max_bytes: 10485760        # 10MB
+  log_backup_count: 5
+
+suricata:
+  # Suricata paths
+  config_path: '/etc/suricata/suricata.yaml'
+  rules_path: '/etc/suricata/rules/'
+  log_path: '/var/log/suricata/'
+  
+  # Service management
+  service_name: 'suricata'
+  systemd_unit: 'suricata.service'
+  
+  # Rule updates
+  rule_update_interval: 3600     # Seconds (1 hour)
+  auto_reload_rules: true
+
+security:
+  # API Key rotation
+  api_key_rotation_days: 90
+  
+  # Sensor certificate settings
+  cert_path: '/etc/hungryhounddog/certs'
+  cert_expiry_warning_days: 30
+  
+  # File integrity
+  verify_rule_integrity: true
+  rule_signature_key: '/etc/hungryhounddog/keys/rules.pub'
+
+monitoring:
+  # Alert thresholds
+  cpu_percent_threshold: 80      # CPU usage warning
+  memory_percent_threshold: 85   # RAM usage warning
+  disk_percent_threshold: 90     # Disk usage warning
+  
+  # Suricata performance
+  eve_queue_alert_size: 10000    # Alert if queue gets too large
+  
+  # Network interface monitoring
+  interface_error_threshold: 100 # Errors per check cycle
+  interface_drop_threshold: 50   # Dropped packets per check cycle
+
+persistence:
+  # Database for tracking state
+  state_db_path: '/var/lib/hungryhounddog/sensor.db'
+  
+  # Seek tracking
+  seek_file_path: '/var/lib/hungryhounddog/eve.seek'
+  
+  # Cache directory
+  cache_dir: '/var/cache/hungryhounddog'
+
+features:
+  # Enable/disable agent features
+  enable_log_shipping: true
+  enable_health_checks: true
+  enable_rule_updates: true
+  enable_packet_capture: true
+  
+  # Advanced features
+  enable_deduplication: true
+  enable_compression: false      # May be useful for Raspberry Pi with limited bandwidth
+  enable_local_caching: true
+
+network:
+  # Network configuration for packet capture
+  capture_interface: 'eth0'
+  capture_filter: ''             # Empty = capture all; set specific filter if needed
+  
+  # Promiscuous mode
+  promisc_mode: true
+  
+  # Ring buffer settings
+  ring_size: 16384
+  block_size: 65536
+  
+  # DNS settings (for reporting)
+  dns_servers:
+    - '8.8.8.8'
+    - '8.8.4.4'
+
+alerts:
+  # Alert delivery settings
+  alert_webhook_url: 'https://brain.hungryhounddog.local/api/alerts'
+  alert_severity_threshold: 'MEDIUM'  # HIGH, MEDIUM, LOW
+  
+  # Alert batching
+  alert_batch_size: 50
+  alert_batch_interval: 60
+
+database:
+  # Local SQLite database for state management
+  type: 'sqlite'
+  path: '/var/lib/hungryhounddog/sensor.db'
+  
+  # Retention settings
+  event_retention_days: 30       # Keep events in local DB for 30 days
+  cleanup_interval: 86400        # Daily cleanup
+
+quality_assurance:
+  # Data quality checks
+  validate_eve_json: true
+  check_for_duplicates: true
+  
+  # Performance metrics
+  track_processing_latency: true
+  track_shipping_latency: true

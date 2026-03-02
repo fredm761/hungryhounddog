@@ -1,0 +1,38 @@
+# ChromaDB Persistence Configuration
+# ===================================
+# Configuration for ChromaDB vector database used for RAG embeddings.
+# This setup uses persistent storage for the embedding index.
+
+# Server Configuration
+server:
+  host: 0.0.0.0
+  port: 8000
+  cors_allow_origins: ["*"]
+
+# Persistence Configuration
+persistence:
+  provider: duckdb+parquet
+  data_dir: /data/chroma
+  anonymized_telemetry: false
+
+# Vector Database Configuration
+vector_db:
+  hnsw_space: cosine
+  max_batch_size: 5460
+
+# Collection Configuration
+collections:
+  embeddings:
+    embedding_function: sentence-transformers
+    embedding_model: all-MiniLM-L6-v2
+    metadata_filtering: true
+
+# Logging Configuration
+logging:
+  level: info
+  format: json
+
+# Memory Configuration
+memory:
+  limit_mb: 2048
+  cache_size: 100

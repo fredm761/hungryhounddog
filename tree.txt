@@ -1,0 +1,136 @@
+Folder PATH listing for volume OS
+Volume serial number is 0289-C796
+C:.
+¦   .env.example
+¦   .gitignore
+¦   docker-compose.yml
+¦   hungryhounddog-roadmap.md
+¦   LICENSE
+¦   README.md
+¦   tree.txt
+¦   
++---adversary
+¦   +---ot_simulator
+¦   ¦       modbus_server.py
+¦   ¦       mqtt_publisher.py
+¦   ¦       
+¦   +---playbooks
+¦   ¦       01_recon_scan.py
+¦   ¦       02_modbus_read.py
+¦   ¦       03_modbus_write_attack.py
+¦   ¦       04_brute_force.py
+¦   ¦       05_data_exfil.py
+¦   ¦       06_lateral_movement.py
+¦   ¦       
+¦   +---scripts
+¦   ¦       install.sh
+¦   ¦       
+¦   +---traffic_gen
+¦           baseline_traffic.py
+¦           
++---docs
+¦   +---architecture
+¦   ¦       design-decisions.md
+¦   ¦       network-topology.md
+¦   ¦       system-overview.md
+¦   ¦       
+¦   +---portfolio
+¦   ¦       interview-stories.md
+¦   ¦       resume-bullets.md
+¦   ¦       
+¦   +---runbooks
+¦           adversary-setup.md
+¦           sensor-deployment.md
+¦           server-setup.md
+¦           troubleshooting.md
+¦           
++---scripts
+¦       backup.sh
+¦       deploy_all.sh
+¦       health_check_all.sh
+¦       
++---sensor
+¦   +---agent
+¦   ¦       config.yaml
+¦   ¦       health_check.py
+¦   ¦       log_shipper.py
+¦   ¦       
+¦   +---config
+¦   ¦   +---suricata
+¦   ¦       ¦   suricata.yaml
+¦   ¦       ¦   
+¦   ¦       +---rules
+¦   ¦               custom-ot.rules
+¦   ¦               
+¦   +---scripts
+¦           install.sh
+¦           
++---server
+¦   +---ai
+¦   ¦   +---chatbot
+¦   ¦   ¦       interface.py
+¦   ¦   ¦       ollama_client.py
+¦   ¦   ¦       
+¦   ¦   +---rag
+¦   ¦       ¦   indexer.py
+¦   ¦       ¦   query_engine.py
+¦   ¦       ¦   
+¦   ¦       +---prompts
+¦   ¦               security_analyst.txt
+¦   ¦               
+¦   +---alerts
+¦   ¦   ¦   alert_manager.py
+¦   ¦   ¦   
+¦   ¦   +---notifiers
+¦   ¦           webhook.py
+¦   ¦           
+¦   +---detection
+¦   ¦   +---ml
+¦   ¦   ¦   ¦   features.py
+¦   ¦   ¦   ¦   predict.py
+¦   ¦   ¦   ¦   train.py
+¦   ¦   ¦   ¦   
+¦   ¦   ¦   +---models
+¦   ¦   ¦           .gitkeep
+¦   ¦   ¦           
+¦   ¦   +---rules
+¦   ¦           correlation.py
+¦   ¦           
+¦   +---docker
+¦   ¦   +---chromadb
+¦   ¦   ¦       config.yaml
+¦   ¦   ¦       
+¦   ¦   +---grafana
+¦   ¦   ¦   +---provisioning
+¦   ¦   ¦       +---dashboards
+¦   ¦   ¦       ¦       dashboard.yml
+¦   ¦   ¦       ¦       
+¦   ¦   ¦       +---datasources
+¦   ¦   ¦               opensearch.yml
+¦   ¦   ¦               
+¦   ¦   +---opensearch
+¦   ¦           opensearch.yml
+¦   ¦           
+¦   +---ingestion
+¦       +---api
+¦       ¦   ¦   main.py
+¦       ¦   ¦   models.py
+¦       ¦   ¦   
+¦       ¦   +---routes
+¦       ¦           health.py
+¦       ¦           ingest.py
+¦       ¦           
+¦       +---parsers
+¦               ot_parser.py
+¦               suricata_parser.py
+¦               
++---switch
+¦   +---config
+¦           sg2008p-config.md
+¦           
++---tests
+        test_adversary.py
+        test_detection.py
+        test_ingestion.py
+        test_rag.py
+        
