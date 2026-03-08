@@ -1,0 +1,50 @@
+# =============================================================================
+# HungryHoundDog — Custom OT Detection Rules
+# Modbus TCP runs on port 502 by default
+# MBAP Protocol ID = 0x0000 at byte offset 2 is the Modbus fingerprint
+# Function Code (FC) is at byte offset 7 of the MBAP+PDU stream
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# VISIBILITY RULES — Log all Modbus traffic
+# ---------------------------------------------------------------------------
+
+alert tcp any any -> any 502 (msg:"OT [MODBUS] Connection to Modbus TCP port"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; classtype:protocol-command-decode; sid:9000001; rev:1;)
+
+alert tcp any 502 -> any any (msg:"OT [MODBUS] Response from Modbus TCP server"; flow:to_client,established; content:"|00 00|"; offset:2; depth:2; classtype:protocol-command-decode; sid:9000002; rev:1;)
+
+# ---------------------------------------------------------------------------
+# READ OPERATIONS — FC 01 through FC 04
+# ---------------------------------------------------------------------------
+
+alert tcp any any -> any 502 (msg:"OT [MODBUS] FC03 Read Holding Registers"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|03|"; offset:7; depth:1; classtype:protocol-command-decode; sid:9000003; rev:1;)
+
+alert tcp any any -> any 502 (msg:"OT [MODBUS] FC01 Read Coil Status"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|01|"; offset:7; depth:1; classtype:protocol-command-decode; sid:9000004; rev:1;)
+
+# ---------------------------------------------------------------------------
+# WRITE OPERATIONS — FC 05, 06, 15, 16
+# ---------------------------------------------------------------------------
+
+alert tcp any any -> any 502 (msg:"OT [MODBUS] WRITE FC06 Write Single Register - MONITOR"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|06|"; offset:7; depth:1; classtype:policy-violation; priority:2; sid:9000005; rev:1;)
+
+alert tcp any any -> any 502 (msg:"OT [MODBUS] WRITE FC05 Write Single Coil - MONITOR"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|05|"; offset:7; depth:1; classtype:policy-violation; priority:2; sid:9000006; rev:1;)
+
+alert tcp any any -> any 502 (msg:"OT [MODBUS] WRITE FC16 Write Multiple Registers - MONITOR"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|10|"; offset:7; depth:1; classtype:policy-violation; priority:2; sid:9000007; rev:1;)
+
+alert tcp any any -> any 502 (msg:"OT [MODBUS] WRITE FC15 Write Multiple Coils - MONITOR"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|0f|"; offset:7; depth:1; classtype:policy-violation; priority:2; sid:9000008; rev:1;)
+
+# ---------------------------------------------------------------------------
+# DANGEROUS OPERATIONS — FC 08, 17, 43
+# ---------------------------------------------------------------------------
+
+alert tcp any any -> any 502 (msg:"OT [MODBUS] FC08 Diagnostics Command - HIGH RISK"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|08|"; offset:7; depth:1; classtype:policy-violation; priority:1; sid:9000009; rev:1;)
+
+alert tcp any any -> any 502 (msg:"OT [MODBUS] FC17 Report Server ID - Device Fingerprinting"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|11|"; offset:7; depth:1; classtype:policy-violation; priority:2; sid:9000010; rev:1;)
+
+alert tcp any any -> any 502 (msg:"OT [MODBUS] FC43 Read Device Identification - Fingerprinting"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|2b|"; offset:7; depth:1; classtype:policy-violation; priority:2; sid:9000011; rev:1;)
+
+# ---------------------------------------------------------------------------
+# EXCEPTION RESPONSES
+# ---------------------------------------------------------------------------
+
+alert tcp any 502 -> any any (msg:"OT [MODBUS] Exception Response from Server - Check for Attack Attempt"; flow:to_client,established; content:"|00 00|"; offset:2; depth:2; byte_test:1,&,0x80,7; classtype:protocol-command-decode; priority:2; sid:9000012; rev:1;)
