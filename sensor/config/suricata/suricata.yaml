@@ -1,0 +1,187 @@
+# HungryHoundDog Suricata IDS Configuration for Raspberry Pi 4
+# Optimized for network monitoring and OT protocol detection
+# Last Updated: 2026-02-27
+
+# Logging configuration
+logging:
+  # Console logging
+  console:
+    enabled: yes
+    level: info
+
+  # File logging
+  file:
+    enabled: yes
+    level: info
+    filename: /var/log/suricata/suricata.log
+
+# Network interface configuration
+af-packet:
+  - interface: eth0
+    # Enable promiscuous mode to capture all traffic
+    promisc: yes
+    # Number of worker threads (adjust based on Pi 4 CPU cores)
+    threads: 2
+    # Ring buffer size (reduced for Pi 4 with limited RAM)
+    ring-size: 16384
+    # Block size for memory efficiency
+    block-size: 65536
+    # Number of blocks (optimize for 2GB RAM)
+    blocks: 32
+
+# Detection engine configuration
+detection-engine:
+  # Rule reload interval (in seconds)
+  rule-reload-interval: 60
+  # Maximum pending packet ratio before dropping
+  dampening:
+    enabled: yes
+    rules-percentage: 10
+    packets-percentage: 10
+
+# Threat detection settings
+threat-detection:
+  # Anti-evasion settings
+  preproc-reject-threshold: 3
+  preproc-drop-threshold: 5
+
+# Output configuration
+outputs:
+  # EVE JSON output for log shipping
+  - eve-log:
+      enabled: yes
+      filename: /var/log/suricata/eve.json
+      types:
+        - alert
+        - http
+        - dns
+        - tls
+        - flow
+        - payload
+        - file-data
+        - traffic-summary
+      community-id: yes
+      community-id-seed: 0
+
+  # Stats output for monitoring
+  - stats:
+      enabled: yes
+      filename: /var/log/suricata/stats.log
+      interval: 60
+
+# Protocol configuration
+protocols:
+  # TCP configuration
+  tcp:
+    stream-events: yes
+    # Memory settings for Pi 4
+    memcap: 64mb
+    # Session tracking
+    checksum-validation: yes
+    # Reassembly settings
+    reassembly:
+      depth: 1mb
+      toserver-chunk-size: 2560
+      toclient-chunk-size: 2560
+
+  # UDP configuration
+  udp:
+    # Reassembly for DNS and other protocols
+    memcap: 32mb
+
+  # HTTP parser
+  http:
+    memcap: 32mb
+    # Custom MIME types if needed
+    custom-ports:
+      - 8080
+      - 8000
+      - 8443
+
+# Rules configuration
+rule-files:
+  - /etc/suricata/rules/suricata.rules
+  - /etc/suricata/rules/custom-ot.rules
+  - /etc/suricata/rules/emerging-threats.rules
+
+# Home network configuration
+vars:
+  address-groups:
+    # Define your OT network here
+    HOME_NET: "[192.168.1.0/24]"
+    EXTERNAL_NET: "!$HOME_NET"
+    # Common OT ports
+    MODBUS_PORTS: "[502]"
+    DNP3_PORTS: "[20000]"
+    PROFINET_PORTS: "[34962,34963,34964]"
+    BACNET_PORTS: "[47808]"
+
+# Memory management (optimize for Pi 4)
+memory:
+  # Packet buffer size
+  memcap: 128mb
+  # Hash table size
+  hash-size: 4096
+
+# Flow settings
+flow:
+  # Memory cap for flows
+  memcap: 32mb
+  # Track protocol state
+  track-payload: yes
+
+# Performance tuning for Raspberry Pi 4
+performance:
+  # Packet processing threads
+  capture-cpu-set: "0,1"
+  # No CPU affinity by default; adjust as needed
+  cpu-affinity:
+    - worker-cpu-set: "2,3"
+
+# Checksum validation
+checksum-validation:
+  # Check TCP checksums
+  tcp: yes
+  # Check UDP checksums
+  udp: yes
+  # Check ICMP checksums
+  icmp: yes
+
+# App-layer protocol detection
+app-layer:
+  # Protocol detection
+  protocols:
+    http:
+      enabled: yes
+      detection-ports:
+        http: 80
+        http: 8080
+        http: 8000
+    tls:
+      enabled: yes
+      detection-ports:
+        https: 443
+        https: 8443
+    dns:
+      enabled: yes
+      detection-ports:
+        dns: 53
+    ssh:
+      enabled: yes
+      detection-ports:
+        ssh: 22
+    smtp:
+      enabled: yes
+      detection-ports:
+        smtp: 25
+    modbus:
+      enabled: yes
+      detection-ports:
+        modbus: 502
+
+# Disable features not needed for OT monitoring (save resources)
+decode-events: no
+noalert: no
+
+# Local settings override
+include: suricata-local.yaml
