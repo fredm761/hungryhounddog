@@ -22,6 +22,9 @@ After=network-online.target suricata.service
 Wants=network-online.target
 # If Suricata is not running, the shipper will wait for eve.json to appear
 Requires=suricata.service
+# Limit restarts to 5 within 60 seconds to prevent crash loops
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -35,9 +38,6 @@ ExecStart=/usr/bin/python3 /home/alfredo/hungryhounddog/sensor/agent/log_shipper
 Restart=on-failure
 RestartSec=10
 
-# Limit restarts to 5 within 60 seconds to prevent crash loops
-StartLimitIntervalSec=60
-StartLimitBurst=5
 
 # Environment — ensure Python can find the packages
 Environment=PYTHONUNBUFFERED=1

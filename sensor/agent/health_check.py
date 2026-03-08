@@ -260,7 +260,7 @@ def get_suricata_status(process_name: str) -> dict:
     try:
         # pgrep returns the PID(s) of matching processes
         result = subprocess.run(
-            ["pgrep", "-x", process_name],
+            ["pgrep", "-f", process_name],
             capture_output=True,
             text=True,
             timeout=5,
