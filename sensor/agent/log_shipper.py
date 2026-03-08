@@ -1,328 +1,518 @@
 #!/usr/bin/env python3
 """
-HungryHoundDog Log Shipper Agent
+=============================================================================
+HungryHoundDog — Log Shipper Agent
+=============================================================================
+Purpose:
+    Continuously reads new lines from Suricata's EVE JSON log file, batches
+    them, and ships them to the Brain's FastAPI ingestion endpoint over HTTPS.
+    When the Brain is unreachable, events are written to a local fallback
+    file so no data is lost.
 
-Monitors Suricata's EVE JSON output, batches events, and ships them to the
-Brain server via HTTPS POST with retry and exponential backoff logic.
+How it works (high level):
+    1. Open eve.json and seek to the end (we only care about NEW events).
+    2. Read new lines as they appear (like 'tail -f').
+    3. Accumulate lines into a batch.
+    4. When the batch hits 'batch_size' OR 'flush_interval_seconds' elapses,
+       send the batch to Brain via HTTP POST.
+    5. If Brain is unreachable, write the batch to a local fallback file.
+    6. Periodically check if eve.json was rotated (Suricata log rotation
+       changes the file's inode). If rotated, reopen the new file.
+    7. Persist the last-read byte position to a state file so that if the
+       agent restarts, it resumes where it left off instead of re-sending
+       old events or skipping new ones.
 
-This agent runs on the Raspberry Pi 4 sensor node and continuously forwards
-security events to the central analysis server.
+Runs on:  Raspberry Pi 4 ("The Sensor")
+Location: /home/alfredo/hungryhounddog/sensor/agent/log_shipper.py
+Service:  hungryhounddog-shipper.service (systemd)
+
+Author:   Alfredo
+Project:  HungryHoundDog — Weekend 2
+=============================================================================
 """
 
 import json
+import logging
 import os
+import signal
 import sys
 import time
-import logging
-import threading
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Dict, Any, Optional
-from dataclasses import dataclass, asdict
-from datetime import datetime
-import hashlib
+
+import requests
 import yaml
 
-try:
-    import requests
-    from requests.adapters import HTTPAdapter
-    from requests.packages.urllib3.util.retry import Retry
-except ImportError:
-    print("ERROR: requests library not found. Install with: pip install requests pyyaml")
-    sys.exit(1)
+# =============================================================================
+# 0x1 — Configuration Loading
+# =============================================================================
+
+def load_config(config_path: str) -> dict:
+    """
+    Reads the YAML configuration file and returns it as a Python dictionary.
+
+    Parameters
+    ----------
+    config_path : str
+        Absolute path to config.yaml.
+
+    Returns
+    -------
+    dict
+        Parsed configuration dictionary.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the config file does not exist at the given path.
+    yaml.YAMLError
+        If the config file contains invalid YAML syntax.
+    """
+    config_file = Path(config_path)
+    if not config_file.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    with open(config_file, "r") as f:
+        config = yaml.safe_load(f)
+
+    return config
 
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('/var/log/hungryhounddog/log_shipper.log'),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logger = logging.getLogger(__name__)
+# =============================================================================
+# 0x2 — Logging Setup
+# =============================================================================
+
+def setup_logging(config: dict) -> logging.Logger:
+    """
+    Configures Python's logging module based on the shared config settings.
+    Logs go to both the console (stdout) and a log file.
+
+    Parameters
+    ----------
+    config : dict
+        The full parsed configuration dictionary.
+
+    Returns
+    -------
+    logging.Logger
+        Configured logger instance named 'log_shipper'.
+    """
+    shared = config["shared"]
+    log_level = getattr(logging, shared["log_level"].upper(), logging.INFO)
+    log_file = Path(shared["log_file"])
+
+    # Create the log directory if it does not exist
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+
+    logger = logging.getLogger("log_shipper")
+    logger.setLevel(log_level)
+
+    # Formatter — includes timestamp, level, and message
+    formatter = logging.Formatter(
+        fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S"
+    )
+
+    # Console handler (stdout) — useful when running manually for debugging
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+
+    # File handler — persistent log for troubleshooting
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+
+    return logger
 
 
-@dataclass
-class ShipperConfig:
-    """Configuration for the log shipper agent"""
-    brain_endpoint: str
-    brain_api_key: str
-    ship_interval: int
-    batch_size: int
-    health_check_interval: int
-    eve_log_path: str
-    seek_file_path: str
-    verify_ssl: bool
-    retry_attempts: int
-    retry_backoff_factor: float
-    connect_timeout: int
-    read_timeout: int
-    sensor_id: str
-    sensor_name: str
+# =============================================================================
+# 0x3 — State Persistence
+# =============================================================================
+# The state file stores the last byte offset and inode of eve.json so that
+# if the agent restarts, it picks up exactly where it left off.
 
-    @staticmethod
-    def from_yaml(config_file: str) -> 'ShipperConfig':
-        """Load configuration from YAML file"""
-        with open(config_file, 'r') as f:
-            config_data = yaml.safe_load(f)
-        
-        agent_config = config_data.get('agent', {})
-        return ShipperConfig(
-            brain_endpoint=agent_config.get('brain_endpoint', 'https://brain.hungryhounddog.local/api/events'),
-            brain_api_key=agent_config.get('brain_api_key', ''),
-            ship_interval=agent_config.get('ship_interval', 30),
-            batch_size=agent_config.get('batch_size', 100),
-            health_check_interval=agent_config.get('health_check_interval', 60),
-            eve_log_path=agent_config.get('eve_log_path', '/var/log/suricata/eve.json'),
-            seek_file_path=agent_config.get('seek_file_path', '/var/lib/hungryhounddog/eve.seek'),
-            verify_ssl=agent_config.get('verify_ssl', True),
-            retry_attempts=agent_config.get('retry_attempts', 3),
-            retry_backoff_factor=agent_config.get('retry_backoff_factor', 2.0),
-            connect_timeout=agent_config.get('connect_timeout', 10),
-            read_timeout=agent_config.get('read_timeout', 30),
-            sensor_id=agent_config.get('sensor_id', 'sensor-001'),
-            sensor_name=agent_config.get('sensor_name', 'RPi4-Sensor-01')
-        )
+def load_state(state_path: str) -> dict:
+    """
+    Loads the persisted state (byte offset and inode) from disk.
 
+    Parameters
+    ----------
+    state_path : str
+        Path to the JSON state file.
 
-class EventBatch:
-    """Represents a batch of events ready for shipping"""
-    
-    def __init__(self, config: ShipperConfig):
-        self.config = config
-        self.events: List[Dict[str, Any]] = []
-        self.batch_id = hashlib.md5(str(time.time()).encode()).hexdigest()[:16]
-        self.created_at = datetime.utcnow().isoformat()
-    
-    def add_event(self, event: Dict[str, Any]) -> None:
-        """Add event to batch"""
-        self.events.append(event)
-    
-    def is_full(self) -> bool:
-        """Check if batch has reached maximum size"""
-        return len(self.events) >= self.config.batch_size
-    
-    def is_stale(self, max_age_seconds: int = 300) -> bool:
-        """Check if batch is older than max age"""
-        created = datetime.fromisoformat(self.created_at)
-        age = (datetime.utcnow() - created).total_seconds()
-        return age > max_age_seconds
-    
-    def to_payload(self) -> Dict[str, Any]:
-        """Convert batch to API payload"""
+    Returns
+    -------
+    dict
+        State dictionary with keys 'offset' (int) and 'inode' (int).
+        Returns defaults (offset=0, inode=0) if the file does not exist
+        or cannot be parsed.
+    """
+    default_state = {"offset": 0, "inode": 0}
+    state_file = Path(state_path)
+
+    if not state_file.exists():
+        return default_state
+
+    try:
+        with open(state_file, "r") as f:
+            state = json.load(f)
         return {
-            'batch_id': self.batch_id,
-            'sensor_id': self.config.sensor_id,
-            'sensor_name': self.config.sensor_name,
-            'timestamp': datetime.utcnow().isoformat(),
-            'event_count': len(self.events),
-            'events': self.events
+            "offset": state.get("offset", 0),
+            "inode": state.get("inode", 0),
         }
+    except (json.JSONDecodeError, KeyError):
+        return default_state
 
 
-class SeekTracker:
-    """Tracks file position in EVE log for resumable reading"""
-    
-    def __init__(self, seek_file: str):
-        self.seek_file = seek_file
-        self.position = 0
-        self._load_seek()
-    
-    def _load_seek(self) -> None:
-        """Load saved position from seek file"""
-        if os.path.exists(self.seek_file):
-            try:
-                with open(self.seek_file, 'r') as f:
-                    data = json.load(f)
-                    self.position = data.get('position', 0)
-                    logger.info(f"Loaded seek position: {self.position}")
-            except Exception as e:
-                logger.warning(f"Failed to load seek file: {e}. Starting from beginning.")
-                self.position = 0
-    
-    def save_seek(self, position: int) -> None:
-        """Save current position to seek file"""
-        os.makedirs(os.path.dirname(self.seek_file), exist_ok=True)
-        try:
-            with open(self.seek_file, 'w') as f:
-                json.dump({'position': position, 'timestamp': time.time()}, f)
-        except Exception as e:
-            logger.error(f"Failed to save seek position: {e}")
+def save_state(state_path: str, offset: int, inode: int) -> None:
+    """
+    Persists the current byte offset and inode to the state file.
+
+    Parameters
+    ----------
+    state_path : str
+        Path to the JSON state file.
+    offset : int
+        Current byte position in eve.json.
+    inode : int
+        Current inode number of eve.json (used to detect log rotation).
+    """
+    state_file = Path(state_path)
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(state_file, "w") as f:
+        json.dump({"offset": offset, "inode": inode}, f)
 
 
-class LogShipper:
-    """Main log shipper agent for forwarding Suricata events"""
-    
-    def __init__(self, config: ShipperConfig):
-        self.config = config
-        self.seek_tracker = SeekTracker(config.seek_file_path)
-        self.session = self._create_session()
-        self.current_batch = EventBatch(config)
-        self.running = False
-        self._last_ship_time = 0
-    
-    def _create_session(self) -> requests.Session:
-        """Create requests session with retry strategy"""
-        session = requests.Session()
-        
-        retry_strategy = Retry(
-            total=self.config.retry_attempts,
-            backoff_factor=self.config.retry_backoff_factor,
-            status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["HEAD", "GET", "POST", "PUT"]
+# =============================================================================
+# 0x4 — Batch Shipping
+# =============================================================================
+
+def ship_to_brain(batch: list[dict], config: dict, logger: logging.Logger) -> bool:
+    """
+    Sends a batch of EVE JSON events to the Brain's FastAPI ingestion
+    endpoint via HTTP POST.
+
+    The payload is a JSON object with two fields:
+        - sensor_id: identifies which sensor sent the data
+        - events: list of EVE JSON event dictionaries
+
+    Parameters
+    ----------
+    batch : list[dict]
+        List of parsed EVE JSON event dictionaries.
+    config : dict
+        Full parsed configuration dictionary.
+    logger : logging.Logger
+        Logger instance for status messages.
+
+    Returns
+    -------
+    bool
+        True if the Brain accepted the batch (HTTP 200/201), False otherwise.
+    """
+    endpoint = config["shipper"]["brain_endpoint"]
+    timeout = config["shared"]["http_timeout"]
+    tls_verify = config["shared"]["tls_verify"]
+    sensor_id = config["shared"]["sensor_id"]
+
+    payload = {
+        "sensor_id": sensor_id,
+        "batch_size": len(batch),
+        "shipped_at": datetime.now(timezone.utc).isoformat(),
+        "events": batch,
+    }
+
+    try:
+        response = requests.post(
+            endpoint,
+            json=payload,
+            timeout=timeout,
+            verify=tls_verify,
         )
-        
-        adapter = HTTPAdapter(max_retries=retry_strategy)
-        session.mount("http://", adapter)
-        session.mount("https://", adapter)
-        
-        session.headers.update({
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {self.config.brain_api_key}',
-            'User-Agent': 'HungryHoundDog-LogShipper/1.0'
-        })
-        
-        return session
-    
-    def read_events(self) -> List[Dict[str, Any]]:
-        """Read new events from EVE log file"""
-        events = []
-        
-        if not os.path.exists(self.config.eve_log_path):
-            logger.warning(f"EVE log not found: {self.config.eve_log_path}")
-            return events
-        
-        try:
-            with open(self.config.eve_log_path, 'r') as f:
-                # Seek to last known position
-                f.seek(self.seek_tracker.position)
-                
-                # Read lines and parse JSON events
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    
-                    try:
-                        event = json.loads(line)
-                        events.append(event)
-                    except json.JSONDecodeError as e:
-                        logger.warning(f"Failed to parse JSON event: {e}")
-                
-                # Update seek position
-                new_position = f.tell()
-                self.seek_tracker.save_seek(new_position)
-                
-                if events:
-                    logger.debug(f"Read {len(events)} new events from EVE log")
-        
-        except Exception as e:
-            logger.error(f"Error reading EVE log: {e}")
-        
-        return events
-    
-    def ship_batch(self, batch: EventBatch) -> bool:
-        """Ship batch to Brain server"""
-        if not batch.events:
-            logger.debug("Skipping empty batch")
-            return True
-        
-        payload = batch.to_payload()
-        
-        try:
-            logger.info(f"Shipping batch {batch.batch_id} with {len(batch.events)} events")
-            
-            response = self.session.post(
-                self.config.brain_endpoint,
-                json=payload,
-                verify=self.config.verify_ssl,
-                timeout=(self.config.connect_timeout, self.config.read_timeout)
+        if response.status_code in (200, 201):
+            logger.info(
+                "Shipped batch of %d events to Brain — HTTP %d",
+                len(batch),
+                response.status_code,
             )
-            
-            response.raise_for_status()
-            logger.info(f"Successfully shipped batch {batch.batch_id}")
             return True
-        
-        except requests.exceptions.Timeout:
-            logger.error(f"Timeout shipping batch {batch.batch_id}")
+        else:
+            logger.warning(
+                "Brain rejected batch — HTTP %d: %s",
+                response.status_code,
+                response.text[:200],
+            )
             return False
-        except requests.exceptions.ConnectionError as e:
-            logger.error(f"Connection error shipping batch: {e}")
-            return False
-        except requests.exceptions.HTTPError as e:
-            logger.error(f"HTTP error shipping batch: {e}")
-            return False
-        except Exception as e:
-            logger.error(f"Unexpected error shipping batch: {e}")
-            return False
-    
-    def process_events(self) -> None:
-        """Process events and manage batching"""
-        new_events = self.read_events()
-        
-        for event in new_events:
-            self.current_batch.add_event(event)
-            
-            # Ship batch if full
-            if self.current_batch.is_full():
-                self.ship_batch(self.current_batch)
-                self.current_batch = EventBatch(self.config)
-        
-        # Periodically ship stale batches
-        current_time = time.time()
-        if (current_time - self._last_ship_time) >= self.config.ship_interval:
-            if self.current_batch.events:
-                self.ship_batch(self.current_batch)
-                self.current_batch = EventBatch(self.config)
-            self._last_ship_time = current_time
-    
-    def run(self) -> None:
-        """Main event loop"""
-        self.running = True
-        logger.info("Log Shipper started")
-        
-        try:
-            while self.running:
-                self.process_events()
-                time.sleep(5)  # Process events every 5 seconds
-        
-        except KeyboardInterrupt:
-            logger.info("Log Shipper interrupted by user")
-        except Exception as e:
-            logger.critical(f"Unexpected error in main loop: {e}")
-        finally:
-            self.shutdown()
-    
-    def shutdown(self) -> None:
-        """Clean shutdown"""
-        logger.info("Shutting down Log Shipper")
-        
-        # Try to ship remaining events
-        if self.current_batch.events:
-            logger.info("Shipping remaining events before shutdown")
-            self.ship_batch(self.current_batch)
-        
-        self.session.close()
-        self.running = False
+
+    except requests.ConnectionError:
+        logger.warning("Brain unreachable at %s — connection refused", endpoint)
+        return False
+    except requests.Timeout:
+        logger.warning("Brain request timed out after %d seconds", timeout)
+        return False
+    except requests.RequestException as e:
+        logger.error("Unexpected HTTP error shipping to Brain: %s", e)
+        return False
+
+
+def write_to_fallback(batch: list[dict], config: dict, logger: logging.Logger) -> None:
+    """
+    Writes a batch of events to the local fallback file (one JSON object
+    per line, aka JSONL format) when the Brain is unreachable.
+
+    This ensures zero data loss. Weekend 3's ingestion service can later
+    drain this fallback file if needed.
+
+    Parameters
+    ----------
+    batch : list[dict]
+        List of parsed EVE JSON event dictionaries.
+    config : dict
+        Full parsed configuration dictionary.
+    logger : logging.Logger
+        Logger instance for status messages.
+    """
+    fallback_path = Path(config["shipper"]["fallback_path"])
+    max_bytes = config["shipper"]["fallback_max_bytes"]
+
+    # Rotate the fallback file if it exceeds the size limit
+    if fallback_path.exists() and fallback_path.stat().st_size > max_bytes:
+        rotated = fallback_path.with_suffix(".jsonl.old")
+        fallback_path.rename(rotated)
+        logger.info("Rotated fallback file to %s", rotated)
+
+    with open(fallback_path, "a") as f:
+        for event in batch:
+            f.write(json.dumps(event) + "\n")
+
+    logger.info(
+        "Wrote %d events to fallback file %s", len(batch), fallback_path
+    )
+
+
+# =============================================================================
+# 0x5 — File Watching (Tail Logic)
+# =============================================================================
+
+def get_inode(file_path: str) -> int:
+    """
+    Returns the inode number of a file. Used to detect log rotation.
+
+    When Suricata rotates eve.json, it creates a new file with a new inode.
+    If the inode changes, we know the file was rotated and we need to reopen.
+
+    Parameters
+    ----------
+    file_path : str
+        Path to the file.
+
+    Returns
+    -------
+    int
+        Inode number, or 0 if the file does not exist.
+    """
+    try:
+        return os.stat(file_path).st_ino
+    except FileNotFoundError:
+        return 0
+
+
+def tail_eve_json(config: dict, logger: logging.Logger) -> None:
+    """
+    Main loop: tails eve.json, batches events, and ships them.
+
+    This function runs indefinitely until the process receives SIGTERM or
+    SIGINT (Ctrl+C). It implements the following logic:
+
+    1. Open eve.json and seek to the last known offset (or end of file on
+       first run).
+    2. Read all available new lines.
+    3. Parse each line as JSON and add to the current batch.
+    4. If batch is full (>= batch_size) OR the flush timer expired,
+       ship the batch to Brain (or write to fallback on failure).
+    5. Save the current file offset and inode to the state file.
+    6. Sleep briefly (0.25s) to avoid busy-waiting, then repeat.
+    7. Periodically check if the file inode changed (log rotation).
+
+    Parameters
+    ----------
+    config : dict
+        Full parsed configuration dictionary.
+    logger : logging.Logger
+        Logger instance.
+    """
+    eve_path = config["shipper"]["eve_json_path"]
+    batch_size = config["shipper"]["batch_size"]
+    flush_interval = config["shipper"]["flush_interval_seconds"]
+    rotation_check = config["shipper"]["rotation_check_seconds"]
+    state_path = config["shipper"]["state_file"]
+
+    # Load persisted state
+    state = load_state(state_path)
+    current_inode = get_inode(eve_path)
+
+    # Decide where to start reading
+    # If the inode matches the saved state, resume at the saved offset.
+    # If the inode differs (file was rotated or first run), start at the
+    # end of the current file so we only ship NEW events going forward.
+    if current_inode == state["inode"] and state["offset"] > 0:
+        start_offset = state["offset"]
+        logger.info(
+            "Resuming from saved state — offset %d, inode %d",
+            start_offset,
+            current_inode,
+        )
+    else:
+        # Seek to end of file — we do not want to re-ship old events
+        start_offset = os.path.getsize(eve_path) if os.path.exists(eve_path) else 0
+        logger.info(
+            "Starting fresh — seeking to end of file (offset %d, inode %d)",
+            start_offset,
+            current_inode,
+        )
+
+    # Wait for eve.json to exist (Suricata might not be running yet)
+    while not os.path.exists(eve_path):
+        logger.warning("Waiting for %s to appear...", eve_path)
+        time.sleep(5)
+
+    # Open the file and seek to our starting position
+    file_handle = open(eve_path, "r")
+    file_handle.seek(start_offset)
+    current_inode = get_inode(eve_path)
+
+    # Initialize batch state
+    batch: list[dict] = []
+    last_flush_time = time.time()
+    last_rotation_check = time.time()
+    parse_errors = 0
+
+    logger.info("Log shipper is running — watching %s", eve_path)
+
+    while True:
+        # --- Read new lines ---
+        line = file_handle.readline()
+
+        if line:
+            line = line.strip()
+            if line:
+                try:
+                    event = json.loads(line)
+                    batch.append(event)
+                except json.JSONDecodeError:
+                    parse_errors += 1
+                    if parse_errors <= 5:
+                        logger.warning("Skipping malformed JSON line: %s", line[:100])
+                    elif parse_errors == 6:
+                        logger.warning("Suppressing further parse error logs")
+        else:
+            # No new data — sleep briefly to avoid busy-waiting
+            # 0.25 seconds gives us sub-second latency for new events while
+            # keeping CPU usage near zero on the Pi (critical for 2 GB RAM)
+            time.sleep(0.25)
+
+        # --- Check batch flush conditions ---
+        now = time.time()
+        time_since_flush = now - last_flush_time
+        should_flush = (
+            len(batch) >= batch_size
+            or (len(batch) > 0 and time_since_flush >= flush_interval)
+        )
+
+        if should_flush:
+            # Try to ship to Brain first; fall back to local file on failure
+            shipped = ship_to_brain(batch, config, logger)
+            if not shipped:
+                write_to_fallback(batch, config, logger)
+
+            # Save state after successful flush
+            current_offset = file_handle.tell()
+            save_state(state_path, current_offset, current_inode)
+
+            # Reset batch
+            batch = []
+            last_flush_time = now
+            parse_errors = 0
+
+        # --- Check for log rotation ---
+        if now - last_rotation_check >= rotation_check:
+            new_inode = get_inode(eve_path)
+            if new_inode != 0 and new_inode != current_inode:
+                logger.info(
+                    "Detected log rotation — inode changed from %d to %d, reopening",
+                    current_inode,
+                    new_inode,
+                )
+                file_handle.close()
+                file_handle = open(eve_path, "r")
+                current_inode = new_inode
+                save_state(state_path, 0, current_inode)
+            last_rotation_check = now
+
+
+# =============================================================================
+# 0x6 — Signal Handling and Main Entry Point
+# =============================================================================
+
+# Global flag for graceful shutdown
+_shutdown_requested = False
+
+
+def handle_shutdown(signum, frame):
+    """
+    Signal handler for SIGTERM and SIGINT. Sets a global flag that the
+    main loop checks to exit gracefully.
+    """
+    global _shutdown_requested
+    _shutdown_requested = True
 
 
 def main():
-    """Main entry point"""
-    config_file = os.environ.get('SHIPPER_CONFIG', '/etc/hungryhounddog/agent/config.yaml')
-    
-    if not os.path.exists(config_file):
-        logger.error(f"Config file not found: {config_file}")
-        sys.exit(1)
-    
+    """
+    Entry point for the log shipper agent.
+
+    Usage:
+        python3 log_shipper.py
+        python3 log_shipper.py --config /path/to/config.yaml
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="HungryHoundDog Log Shipper — ships Suricata EVE JSON to Brain"
+    )
+    parser.add_argument(
+        "--config",
+        default="/home/alfredo/hungryhounddog/sensor/agent/config.yaml",
+        help="Path to config.yaml (default: %(default)s)",
+    )
+    args = parser.parse_args()
+
+    # Load configuration
+    config = load_config(args.config)
+
+    # Set up logging
+    logger = setup_logging(config)
+    logger.info("=" * 60)
+    logger.info("HungryHoundDog Log Shipper starting")
+    logger.info("=" * 60)
+
+    # Register signal handlers for graceful shutdown
+    signal.signal(signal.SIGTERM, handle_shutdown)
+    signal.signal(signal.SIGINT, handle_shutdown)
+
+    # Start tailing
     try:
-        config = ShipperConfig.from_yaml(config_file)
-        shipper = LogShipper(config)
-        shipper.run()
+        tail_eve_json(config, logger)
+    except KeyboardInterrupt:
+        logger.info("Received keyboard interrupt — shutting down")
     except Exception as e:
-        logger.critical(f"Failed to start Log Shipper: {e}")
+        logger.error("Fatal error: %s", e, exc_info=True)
         sys.exit(1)
+    finally:
+        logger.info("Log shipper stopped")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

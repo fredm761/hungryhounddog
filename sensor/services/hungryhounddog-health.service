@@ -1,0 +1,31 @@
+# =============================================================================
+# HungryHoundDog Health Check — systemd Service Unit
+# =============================================================================
+# This is a "oneshot" service — it runs the health check once and exits.
+# It is triggered periodically by hungryhounddog-health.timer.
+#
+# Install location: /etc/systemd/system/hungryhounddog-health.service
+# =============================================================================
+
+[Unit]
+Description=HungryHoundDog Health Check — Sensor System Metrics
+Documentation=https://github.com/fredm761/hungryhounddog
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=alfredo
+Group=alfredo
+
+ExecStart=/usr/bin/python3 /home/alfredo/hungryhounddog/sensor/agent/health_check.py --config /home/alfredo/hungryhounddog/sensor/agent/config.yaml
+
+Environment=PYTHONUNBUFFERED=1
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/tmp /var/log/hungryhounddog
+
+[Install]
+WantedBy=multi-user.target

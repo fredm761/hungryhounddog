@@ -1,0 +1,53 @@
+# =============================================================================
+# HungryHoundDog Log Shipper — systemd Service Unit
+# =============================================================================
+# This service runs the log shipper as a long-lived daemon that continuously
+# tails Suricata's eve.json and ships events to the Brain.
+#
+# Install location: /etc/systemd/system/hungryhounddog-shipper.service
+#
+# Commands:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable hungryhounddog-shipper
+#   sudo systemctl start hungryhounddog-shipper
+#   sudo systemctl status hungryhounddog-shipper
+#   journalctl -u hungryhounddog-shipper -f    (live logs)
+# =============================================================================
+
+[Unit]
+Description=HungryHoundDog Log Shipper — Suricata EVE JSON to Brain
+Documentation=https://github.com/fredm761/hungryhounddog
+# Start after networking and Suricata are up
+After=network-online.target suricata.service
+Wants=network-online.target
+# If Suricata is not running, the shipper will wait for eve.json to appear
+Requires=suricata.service
+
+[Service]
+Type=simple
+User=alfredo
+Group=alfredo
+
+# The agent script and its config file path
+ExecStart=/usr/bin/python3 /home/alfredo/hungryhounddog/sensor/agent/log_shipper.py --config /home/alfredo/hungryhounddog/sensor/agent/config.yaml
+
+# Restart automatically on failure (but not on clean exit)
+Restart=on-failure
+RestartSec=10
+
+# Limit restarts to 5 within 60 seconds to prevent crash loops
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Environment — ensure Python can find the packages
+Environment=PYTHONUNBUFFERED=1
+
+# Security hardening — restrict what the service can do
+# The shipper only needs to read eve.json and write to /tmp and state file
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/tmp /var/lib/hungryhounddog /var/log/hungryhounddog
+
+[Install]
+WantedBy=multi-user.target

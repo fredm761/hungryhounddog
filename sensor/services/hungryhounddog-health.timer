@@ -1,0 +1,40 @@
+# =============================================================================
+# HungryHoundDog Health Check — systemd Timer Unit
+# =============================================================================
+# Triggers hungryhounddog-health.service every 60 seconds.
+#
+# Why a timer instead of a cron job?
+#   systemd timers integrate with the journal (journalctl), support
+#   dependencies, and are the modern Linux standard for scheduled tasks.
+#   This is the pattern used in enterprise deployments — learning it here
+#   maps directly to production infrastructure management.
+#
+# Install location: /etc/systemd/system/hungryhounddog-health.timer
+#
+# Commands:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable hungryhounddog-health.timer
+#   sudo systemctl start hungryhounddog-health.timer
+#   systemctl list-timers                           (see all active timers)
+#   journalctl -u hungryhounddog-health.service -f  (see health check output)
+# =============================================================================
+
+[Unit]
+Description=HungryHoundDog Health Check Timer — runs every 60 seconds
+
+[Timer]
+# Run 30 seconds after boot (gives Suricata time to start)
+OnBootSec=30s
+
+# Then repeat every 60 seconds
+OnUnitActiveSec=60s
+
+# Add up to 5 seconds of random delay to avoid exact-second spikes
+# (mimics enterprise jitter configuration to prevent thundering herd)
+RandomizedDelaySec=5s
+
+# Ensure the timer stays persistent across reboots
+Persistent=true
+
+[Install]
+WantedBy=timers.target

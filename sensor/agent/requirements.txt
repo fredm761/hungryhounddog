@@ -1,0 +1,14 @@
+# =============================================================================
+# HungryHoundDog Sensor Agent — Python Dependencies
+# =============================================================================
+# Install on Raspberry Pi with:
+#   pip3 install -r requirements.txt --break-system-packages
+#
+# These are intentionally minimal to keep the Pi's memory footprint low.
+# =============================================================================
+
+# YAML parser — reads config.yaml
+PyYAML>=6.0
+
+# HTTP client — ships logs and health reports to Brain's FastAPI endpoint
+requests>=2.28.0
