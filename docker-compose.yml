@@ -1,120 +1,86 @@
-# HungryHoundDog — Docker Compose Orchestration
-# Runs on the Ubuntu PC ("The Brain")
-# Usage: docker-compose up -d
-
-version: "3.8"
+# HungryHoundDog — Docker Compose (Brain Server)
+# Weekend 3: OpenSearch + Grafana + FastAPI Ingestion
+# Run: docker compose up -d
+# Logs: docker compose logs -f
 
 services:
-  # --- Log Storage and Search Engine ---
+  # --- OpenSearch: Single-node log storage and search engine ---
   opensearch:
-    image: opensearchproject/opensearch:2.12.0
-    container_name: hungryhounddog-opensearch
+    image: opensearchproject/opensearch:2.18.0
+    container_name: hhd-opensearch
     environment:
       - discovery.type=single-node
       - OPENSEARCH_JAVA_OPTS=-Xms4g -Xmx4g
-      - DISABLE_SECURITY_PLUGIN=true  # Disable for local lab; enable in production
+      - bootstrap.memory_lock=true
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - cluster.name=hungryhounddog
+      - node.name=brain
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
     volumes:
       - opensearch-data:/usr/share/opensearch/data
-      - ./server/docker/opensearch/opensearch.yml:/usr/share/opensearch/config/opensearch.yml
     ports:
-      - "9200:9200"  # REST API
-      - "9600:9600"  # Performance analyzer
+      - "9200:9200"
     networks:
-      - hungryhounddog-net
+      - hhd-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
     restart: unless-stopped
 
-  # --- Dashboard and Visualization ---
+  # --- Grafana: Dashboard and visualization ---
   grafana:
-    image: grafana/grafana:10.3.1
-    container_name: hungryhounddog-grafana
+    image: grafana/grafana-oss:11.4.0
+    container_name: hhd-grafana
     environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-changeme}
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=hungryhound
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-opensearch-datasource
     volumes:
       - grafana-data:/var/lib/grafana
       - ./server/docker/grafana/provisioning:/etc/grafana/provisioning
     ports:
       - "3000:3000"
+    networks:
+      - hhd-net
     depends_on:
-      - opensearch
-    networks:
-      - hungryhounddog-net
+      opensearch:
+        condition: service_healthy
     restart: unless-stopped
 
-  # --- Vector Database for RAG ---
-  chromadb:
-    image: chromadb/chroma:0.4.22
-    container_name: hungryhounddog-chromadb
-    volumes:
-      - chromadb-data:/chroma/chroma
-    ports:
-      - "8000:8000"
-    networks:
-      - hungryhounddog-net
-    restart: unless-stopped
-
-  # --- Local LLM Runtime ---
-  ollama:
-    image: ollama/ollama:latest
-    container_name: hungryhounddog-ollama
-    volumes:
-      - ollama-data:/root/.ollama
-    ports:
-      - "11434:11434"
-    networks:
-      - hungryhounddog-net
-    restart: unless-stopped
-
-  # --- Log Ingestion API ---
-  ingestion-api:
+  # --- FastAPI: Log ingestion service ---
+  ingestion:
     build:
       context: ./server/ingestion
       dockerfile: Dockerfile
-    container_name: hungryhounddog-ingestion
+    container_name: hhd-ingestion
     environment:
       - OPENSEARCH_HOST=opensearch
       - OPENSEARCH_PORT=9200
+      - INDEX_PREFIX=hungryhounddog-events
     ports:
       - "8080:8080"
-    depends_on:
-      - opensearch
     networks:
-      - hungryhounddog-net
-    restart: unless-stopped
-
-  # --- AI Chatbot API ---
-  chatbot:
-    build:
-      context: ./server/ai
-      dockerfile: Dockerfile
-    container_name: hungryhounddog-chatbot
-    environment:
-      - OLLAMA_HOST=ollama
-      - OLLAMA_PORT=11434
-      - CHROMADB_HOST=chromadb
-      - CHROMADB_PORT=8000
-      - OPENSEARCH_HOST=opensearch
-      - OPENSEARCH_PORT=9200
-    ports:
-      - "8501:8501"
+      - hhd-net
     depends_on:
-      - ollama
-      - chromadb
-      - opensearch
-    networks:
-      - hungryhounddog-net
+      opensearch:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
   opensearch-data:
-    driver: local
   grafana-data:
-    driver: local
-  chromadb-data:
-    driver: local
-  ollama-data:
-    driver: local
 
 networks:
-  hungryhounddog-net:
+  hhd-net:
     driver: bridge

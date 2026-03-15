@@ -1,0 +1,16 @@
+# Grafana auto-provisioning: Dashboard provider
+# Tells Grafana where to find dashboard JSON files on startup.
+
+apiVersion: 1
+
+providers:
+  - name: "HungryHoundDog"
+    orgId: 1
+    folder: "HungryHoundDog"
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

@@ -1,0 +1,21 @@
+# Grafana auto-provisioning: OpenSearch data source
+# This file is mounted into the Grafana container at startup.
+# Grafana will automatically configure OpenSearch as a data source.
+
+apiVersion: 1
+
+datasources:
+  - name: OpenSearch
+    type: grafana-opensearch-datasource
+    access: proxy
+    url: http://opensearch:9200
+    isDefault: true
+    jsonData:
+      database: "hungryhounddog-events-*"
+      flavor: "opensearch"
+      version: "2.18.0"
+      timeField: "timestamp"
+      logMessageField: "alert.signature"
+      logLevelField: "alert.severity"
+      pplEnabled: true
+    editable: true
