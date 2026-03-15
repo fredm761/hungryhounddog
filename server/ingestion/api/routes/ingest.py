@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from opensearchpy.helpers import bulk
 
-from api.main import get_os_client
+from api.db import get_os_client
 from api.models import IngestBatch, IngestResponse
 
 logger = logging.getLogger("hhd.ingest")

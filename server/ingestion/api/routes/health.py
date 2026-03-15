@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 
-from api.main import get_os_client
+from api.db import get_os_client
 from api.models import HealthResponse, SensorHealthReport
 
 logger = logging.getLogger("hhd.health")

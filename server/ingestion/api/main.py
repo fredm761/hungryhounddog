@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from opensearchpy import OpenSearch
 
+from api.db import set_os_client
 from api.routes.ingest import router as ingest_router
 from api.routes.health import router as health_router
 
@@ -19,36 +20,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger("hhd.ingestion")
 
-# --- OpenSearch client (module-level singleton) ---
-os_client: OpenSearch | None = None
-
-
-def get_os_client() -> OpenSearch:
-    """Return the OpenSearch client. Called by route handlers."""
-    if os_client is None:
-        raise RuntimeError("OpenSearch client not initialized")
-    return os_client
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle: connect to OpenSearch, create index template."""
     import os
 
-    global os_client
-
     host = os.environ.get("OPENSEARCH_HOST", "opensearch")
     port = int(os.environ.get("OPENSEARCH_PORT", "9200"))
 
-    os_client = OpenSearch(
+    client = OpenSearch(
         hosts=[{"host": host, "port": port}],
         use_ssl=False,
         verify_certs=False,
         timeout=30,
     )
 
+    # Store in the shared module
+    set_os_client(client)
+
     # Verify connectivity
-    info = os_client.info()
+    info = client.info()
     logger.info(
         "Connected to OpenSearch %s (cluster: %s)",
         info["version"]["number"],
@@ -56,21 +48,15 @@ async def lifespan(app: FastAPI):
     )
 
     # Create an index template so every daily index gets the right settings
-    _create_index_template(os_client)
+    _create_index_template(client)
 
     yield  # App runs here
 
-    os_client.close()
+    client.close()
     logger.info("OpenSearch connection closed")
 
 
 def _create_index_template(client: OpenSearch) -> None:
-    """
-    Create/update an index template for hungryhounddog-events-* indices.
-
-    Sets 1 shard / 0 replicas (single-node cluster) and maps key fields
-    with appropriate types so OpenSearch doesn't guess wrong.
-    """
     import os
 
     prefix = os.environ.get("INDEX_PREFIX", "hungryhounddog-events")

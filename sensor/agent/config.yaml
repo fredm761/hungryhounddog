@@ -13,7 +13,7 @@ shipper:
   eve_json_path: "/var/log/suricata/eve.json"
 
   # Brain's FastAPI ingestion endpoint (Weekend 3 will stand this up)
-  brain_endpoint: "https://10.0.0.180:8443/ingest"
+  brain_endpoint: "http://10.0.0.180:8080/ingest"
 
   # Maximum number of events to accumulate before sending a batch
   batch_size: 50
@@ -36,7 +36,7 @@ shipper:
 # --- Health Check Settings --------------------------------------------------
 health:
   # Brain's health reporting endpoint (Weekend 3 will stand this up)
-  brain_endpoint: "https://10.0.0.180:8443/health/sensor"
+  brain_endpoint: "http://10.0.0.180:8080/health/sensor"
 
   # Local fallback file when Brain is unreachable
   fallback_path: "/tmp/hungryhounddog_health.jsonl"
